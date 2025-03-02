@@ -797,7 +797,7 @@ vps_list = [
         "username": "userpktd",
         "password": "user@pktd123",
         "active_attacks": 0,
-        "max_attacks": 2,
+        "max_attacks": 4,
         "ongoing_attacks": [],
         "attack_start_time": None,
         "attack_duration": 0
@@ -807,7 +807,7 @@ vps_list = [
         "username": "userpktd",
         "password": "user@pktd123",
         "active_attacks": 0,
-        "max_attacks": 1,
+        "max_attacks": 3,
         "ongoing_attacks": [],
         "attack_start_time": None,
         "attack_duration": 0
