@@ -65,7 +65,6 @@ def read_users():
 def clean_expired_users():
     try:
         current_time = datetime.now(IST)
-        
         # Find expired users
         expired_users = list(users_collection.find({"expiration": {"$lt": current_time}}))
         
@@ -73,9 +72,7 @@ def clean_expired_users():
         if expired_users:
             # Send notifications first
             for user in expired_users:
-                # Check if the user has already been notified
-                if not user.get("notified", False):
-                    user_message = f"""🚫 Subscription Expired
+                user_message = f"""🚫 Subscription Expired
 👤 User: @{user['username']}
 🔑 Key: {user['key']}
 ⏰ Expired at: {user['expiration'].strftime('%Y-%m-%d %H:%M:%S')} IST
@@ -86,31 +83,25 @@ def clean_expired_users():
 3. Use the `/redeem` command to activate it
 
 📢 For assistance, contact support or visit our channel: @MATRIX_CHEATS"""
-                    
-                    try:
-                        bot.send_message(user['user_id'], user_message)
-                    except Exception as e:
-                        logging.error(f"Failed to notify user {user['user_id']}: {e}")
-                        continue
-                    
-                    # Notify admin once per expired user
-                    admin_message = f"""🚨 Key Expired Notification
+                
+                try:
+                    bot.send_message(user['user_id'], user_message)
+                except Exception as e:
+                    logging.error(f"Failed to notify user {user['user_id']}: {e}")
+                    continue
+                
+                # Notify admin once per expired user
+                admin_message = f"""🚨 Key Expired Notification
 👤 User: @{user['username']}
 🆔 User ID: {user['user_id']}
 🔑 Key: {user['key']}
 ⏰ Expired at: {user['expiration'].strftime('%Y-%m-%d %H:%M:%S')} IST"""
-                    
-                    for admin in admin_id:
-                        try:
-                            bot.send_message(admin, admin_message)
-                        except Exception as e:
-                            logging.error(f"Failed to notify admin {admin}: {e}")
-                    
-                    # Mark the user as notified to prevent duplicate notifications
-                    users_collection.update_one(
-                        {"user_id": user['user_id']},
-                        {"$set": {"notified": True}}
-                    )
+                
+                for admin in admin_id:
+                    try:
+                        bot.send_message(admin, admin_message)
+                    except Exception as e:
+                        logging.error(f"Failed to notify admin {admin}: {e}")
             
             # Delete all expired users in a single operation
             user_ids = [user['user_id'] for user in expired_users]
@@ -1295,15 +1286,6 @@ def broadcast_message(message):
     bot.reply_to(message, response)
 
 import threading
-
-def cleanup_thread():
-    while True:
-        clean_expired_users()
-        time.sleep(60)  # Check every minute
-
-# Start the cleanup thread
-cleanup_thread = threading.Thread(target=cleanup_thread, daemon=True)
-cleanup_thread.start()
 
 def cleanup_task():
     while True:
