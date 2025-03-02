@@ -1020,6 +1020,10 @@ def handle_matrix(message):
 💡 𝗧𝗿𝘆 𝗔𝗴𝗮𝗶𝗻 𝗟𝗮𝘁𝗲𝗿""")
             return
 
+        # Enforce cooldown immediately after attack is initiated
+        if user_id not in admin_owner:
+            user_cooldowns[user_id] = datetime.now(IST)
+
         admin_notification = f"""
 🚨 𝗔𝗧𝗧𝗔𝗖𝗞 𝗟𝗔𝗨𝗡𝗖𝗛 𝗡𝗢𝗧𝗜𝗙𝗜𝗖𝗔𝗧𝗜𝗢𝗡
 
@@ -1054,8 +1058,6 @@ def handle_matrix(message):
         def attack_callback():
             try:
                 result = execute_attack_on_vps(vps, target, port, time_attack)
-                if user_id not in admin_owner:
-                    user_cooldowns[user_id] = datetime.now(IST)
                 bot.reply_to(message, result)
                 
                 completion_time = datetime.now(IST)
