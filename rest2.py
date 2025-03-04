@@ -1017,16 +1017,6 @@ from collections import deque
 # Modified VPS configuration with tracking
 vps_list = [
     {
-        "host": "52.140.40.43",
-        "username": "userpktd",
-        "password": "user@pktd123",
-        "active_attacks": 0,
-        "max_attacks": 4,
-        "ongoing_attacks": [],
-        "attack_start_time": None,
-        "attack_duration": 0
-    },
-    {
         "host": "52.140.0.101",
         "username": "userpktd",
         "password": "user@pktd123",
