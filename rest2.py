@@ -122,19 +122,26 @@ def create_indexes():
 
         logging.error(f"Error creating indexes: {e}")
 
-def parse_time_input(time_input):
+def parse_time_input(time_input, max_uses=None):
+    print(f"DEBUG - Received time_input: {time_input}, max_uses: {max_uses}")  # Debug print
     match = re.match(r"(\d+)([mhd])", time_input)
     if match:
         number = int(match.group(1))
         unit = match.group(2)
-        
+
         if unit == "m":
-            return timedelta(minutes=number), f"{number}m"
+            result = (timedelta(minutes=number), f"{number}m", max_uses or 1)
         elif unit == "h":
-            return timedelta(hours=number), f"{number}h"
+            result = (timedelta(hours=number), f"{number}h", max_uses or 1)
         elif unit == "d":
-            return timedelta(days=number), f"{number}d"
-    return None, None
+            result = (timedelta(days=number), f"{number}d", max_uses or 1)
+        else:
+            result = None, None, None
+    else:
+        result = None, None, None
+    
+    print("DEBUG - parse_time_input returning:", result)  # Debug output
+    return result
 
 
 @bot.message_handler(commands=['key'])
@@ -151,35 +158,54 @@ def generate_key(message):
             return
 
         duration_str = args[1]
-        duration, formatted_duration = parse_time_input(duration_str)
+
+        # Parse the time input
+        duration, formatted_duration, _ = parse_time_input(duration_str)  
+
         if not duration:
             bot.reply_to(message, "❌ Invalid duration format. Use: 1d, 7d, 30d")
             return
 
+        # Generate a unique key
         letters = ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=4))
         numbers = ''.join(str(random.randint(0, 9)) for _ in range(4))
         key = f"MATRIX-VIP-{letters}{numbers}"
 
-        # Insert into MongoDB
+        # Store duration but DO NOT set expiration yet (it will be set on redemption)
+        created_at = datetime.now(IST)  # Use IST timezone
+
         keys_collection.insert_one({
             "key": key,
             "duration": formatted_duration,
-            "created_at": datetime.now(IST),
+            "created_at": created_at,
             "is_used": False
         })
 
-        bot.reply_to(message, f"""✅ Key Generated Successfully
+        # Build the success message
+        success_message = f"""
+✅ Key Generated Successfully
+━━━━━━━━━━━━━━━
 🔑 Key: `{key}`
 ⏱ Duration: {formatted_duration}
-📅 Generated: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')} IST""")
+📅 Created At: {created_at.strftime('%Y-%m-%d %H:%M:%S')} IST
+━━━━━━━━━━━━━━━
+💡 Expiration starts when redeemed.
+"""
+
+        bot.reply_to(message, success_message)
+
     except Exception as e:
         bot.reply_to(message, f"❌ Error generating key: {str(e)}")
 
 
+
+# Modify the /redeem command to support multi-use keys
 @bot.message_handler(commands=['redeem'])
 def redeem_key(message):
     try:
         user_id = str(message.chat.id)
+
+        # Prevent usage in groups
         if user_id.startswith('-'):
             bot.reply_to(message, """
 ⚠️ 𝗚𝗥𝗢𝗨𝗣 𝗔𝗖𝗖𝗘𝗦𝗦 𝗗𝗘𝗡𝗜𝗘𝗗
@@ -198,7 +224,7 @@ def redeem_key(message):
 
         args = message.text.split()
         if len(args) != 2:
-            usage_text = """
+            bot.reply_to(message, """
 💎 𝗞𝗘𝗬 𝗥𝗘𝗗𝗘𝗠𝗣𝗧𝗜𝗢𝗡
 ━━━━━━━━━━━━━━━
 📝 𝗨𝘀𝗮𝗴𝗲: /redeem 𝗠𝗔𝗧𝗥𝗜𝗫-𝗩𝗜𝗣-𝗫𝗫𝗫𝗫
@@ -211,14 +237,16 @@ def redeem_key(message):
 🔑 𝗘𝘅𝗮𝗺𝗽𝗹𝗲: /redeem 𝗠𝗔𝗧𝗥𝗜𝗫-𝗩𝗜𝗣-𝗔𝗕𝗖𝗗𝟭𝟮𝟯𝟰
 
 💡 𝗡𝗲𝗲𝗱 𝗮 𝗸𝗲𝘆? 𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝗢𝘂𝗿 𝗔𝗱𝗺𝗶𝗻𝘀 𝗢𝗿 𝗥𝗲𝘀𝗲𝗹𝗹𝗲𝗿𝘀
-━━━━━━━━━━━━━━━"""
-            bot.reply_to(message, usage_text)
+━━━━━━━━━━━━━━━""")
             return
 
         key = args[1].strip()
         username = message.from_user.username or "Unknown"
-        current_time = datetime.now(IST)
+        current_time = datetime.now(IST)  # Always use IST
 
+        print(f"DEBUG - Redeeming key: {key} for user {user_id} at {current_time}")
+
+        # Check if the user already has an active subscription
         existing_user = users_collection.find_one({
             "user_id": user_id,
             "expiration": {"$gt": current_time}
@@ -240,78 +268,100 @@ def redeem_key(message):
 You cannot redeem a new key while having an active subscription.
 Please wait for your current subscription to expire.
 
-💡 𝗧𝗶𝗽: Use /check to view your subscription status
+💡 𝗧𝗶𝗽: Use /start to view your subscription status
 ━━━━━━━━━━━━━━━""")
             return
 
-        key_doc = keys_collection.find_one({"key": key, "is_used": False})
+        # Check if the key exists
+        key_doc = keys_collection.find_one({"key": key})
         if not key_doc:
-            bot.reply_to(message, "❌ Invalid or already used key!")
+            bot.reply_to(message, "❌ Invalid key!")
             return
 
-        duration_str = key_doc['duration']
-        duration, _ = parse_time_input(duration_str)
-        
-        if not duration:
-            bot.reply_to(message, "❌ Invalid key duration!")
+        # Handle expiration separately for `/key` and `/gkey`
+        expiration = key_doc.get("expiration")
+
+        if expiration:
+            # If expiration is already set, it's from `/gkey`
+            if expiration.tzinfo is None:
+                expiration = expiration.replace(tzinfo=pytz.UTC)
+            expiration = expiration.astimezone(IST)
+        else:
+            # If no expiration, it's from `/key`, so set expiration now
+            duration_str = key_doc.get("duration")
+            duration, _, _ = parse_time_input(duration_str)
+            expiration = current_time + duration
+
+        # Ensure the key isn't expired
+        if expiration and expiration < current_time:
+            bot.reply_to(message, "❌ This key has expired!")
             return
 
-        redeemed_at = datetime.now(IST)
-        expiration = redeemed_at + duration
+        # Check if the key has remaining uses (for multi-use keys)
+        if "max_uses" in key_doc:
+            if key_doc["used_count"] >= key_doc["max_uses"]:
+                bot.reply_to(message, """❌ This key has reached its maximum usage limit!
+                💡 𝗧𝗶𝗽: Buy Key From Any Admin Or Owner""")
+                keys_collection.update_one({"key": key}, {"$set": {"is_used": True}})
+                return
+            else:
+                # Increment the used count
+                keys_collection.update_one({"key": key}, {"$inc": {"used_count": 1}})
+                used_count = key_doc["used_count"] + 1
+                max_uses = key_doc["max_uses"]
+                usage_status = f"{used_count}/{max_uses}"
+        else:
+            usage_status = "Single-use"
 
+        # Store the user with the expiration time
         users_collection.insert_one({
             "user_id": user_id,
             "username": username,
             "key": key,
-            "redeemed_at": redeemed_at,
-            "expiration": expiration
+            "redeemed_at": current_time.strftime('%Y-%m-%d %H:%M:%S') + " IST",
+            "expiration": expiration.strftime('%Y-%m-%d %H:%M:%S') + " IST"
         })
 
-        keys_collection.update_one({"key": key}, {"$set": {"is_used": True}})
-
-        user_message = f"""
-✨ 𝗞𝗘𝗬 𝗥𝗘𝗗𝗘𝗘𝗠𝗘𝗗 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟𝗟𝗬 ✨
+        # Build the success message
+        success_message = f"""
+✅ 𝗞𝗘𝗬 𝗥𝗘𝗗𝗘𝗘𝗠𝗘𝗗 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟𝗟𝗬
 ━━━━━━━━━━━━━━━
 👤 User: @{username}
 🆔 ID: {user_id}
 🔑 Key: {key}
-
-⏰ 𝗧𝗶𝗺𝗲𝗹𝗶𝗻𝗲:
-• Activated: {redeemed_at.strftime('%Y-%m-%d %H:%M:%S')} IST
-• Expires: {expiration.strftime('%Y-%m-%d %H:%M:%S')} IST
-• Duration: {duration_str}
-
-💎 𝗦𝘁𝗮𝘁𝘂𝘀: Active ✅
-📢 Channel: @MATRIX_CHEATS
+⏱️ Duration: {key_doc.get("duration", "Unknown")}
+📅 Expires: {expiration.strftime('%Y-%m-%d %H:%M:%S')} IST
 ━━━━━━━━━━━━━━━
+💡 Enjoy your subscription!
+💥 Send Feedbacks 
+"""
 
-💡 Use /matrix command to launch attacks
-⚡️ Use /check to view system status"""
+        bot.reply_to(message, success_message)
 
-        bot.reply_to(message, user_message)
-
+        # Notify admins
         admin_message = f"""
 🚨 𝗞𝗘𝗬 𝗥𝗘𝗗𝗘𝗘𝗠𝗘𝗗 𝗡𝗢𝗧𝗜𝗙𝗜𝗖𝗔𝗧𝗜𝗢𝗡
 ━━━━━━━━━━━━━━━
 👤 User: @{username}
 🆔 User ID: {user_id}
 🔑 Key: {key}
-⏱️ Duration: {duration_str}
-📅 Activated: {redeemed_at.strftime('%Y-%m-%d %H:%M:%S')} IST
+⏱️ Duration: {key_doc.get("duration", "Unknown")}
 📅 Expires: {expiration.strftime('%Y-%m-%d %H:%M:%S')} IST
-━━━━━━━━━━━━━━━"""
+"""
+
+        # Add usage status for multi-use keys
+        if "max_uses" in key_doc:
+            admin_message += f"🔢 Usage: {usage_status}\n"
+
+        admin_message += "━━━━━━━━━━━━━━━"
 
         for admin in admin_id:
             bot.send_message(admin, admin_message)
 
     except Exception as e:
-        error_message = f"""
-❌ 𝗘𝗥𝗥𝗢𝗥 𝗥𝗘𝗗𝗘𝗘𝗠𝗜𝗡𝗚 𝗞𝗘𝗬
-━━━━━━━━━━━━━━━
-⚠️ Error: {str(e)}
-⏰ Time: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')} IST
-━━━━━━━━━━━━━━━"""
-        bot.reply_to(message, error_message)
+        bot.reply_to(message, f"❌ Error redeeming key: {str(e)}")
+        print(f"ERROR - redeem_key(): {e}")
+
 
 
 @bot.message_handler(commands=['addtime'])
@@ -408,97 +458,229 @@ Failed to add time: {str(e)}
         bot.reply_to(message, error_message)
 
 
-
 @bot.message_handler(commands=['allkeys'])
-def show_all_keys(message):
-    if str(message.chat.id) not in admin_id:
-        bot.reply_to(message, "⛔️ Access Denied: Admin only command")
+def all_keys(message):
+    user_id = str(message.chat.id)
+
+    # Ensure only admins or resellers can access this command
+    if user_id not in admin_owner:
+        bot.reply_to(message, "⛔ Access Denied: Admin-only command")
         return
-    
+
     try:
-        # Aggregate unused keys with duration grouping
-        keys = keys_collection.aggregate([
-            {
-                "$lookup": {
-                    "from": "reseller_transactions",
-                    "localField": "key",
-                    "foreignField": "key_generated",
-                    "as": "transaction"
-                }
-            },
-            {
-                "$match": {"is_used": False}
-            },
-            {
-                "$sort": {"duration": 1, "created_at": -1}
-            }
-        ])
-        
-        if not keys:
-            bot.reply_to(message, "📝 No unused keys available")
+        # Get current IST time
+        current_time = datetime.now(IST)
+
+        # Fetch only ACTIVE and USABLE keys
+        all_keys = list(db.get_collection("unused_keys").find({
+            "$or": [
+                {"max_uses": {"$exists": False}, "is_used": False},  # Single-use keys
+                {"max_uses": {"$gt": 0}, "$expr": {"$lt": ["$used_count", "$max_uses"]}}  # Multi-use keys with remaining uses
+            ],
+            "$or": [
+                {"expiration": {"$exists": False}},  # No expiration set
+                {"expiration": {"$gte": current_time}}  # Not expired
+            ]
+        }))
+
+        if not all_keys:
+            bot.reply_to(message, 
+                "✅ No Active Keys Available\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                "🚀 All usable keys have been redeemed.\n"
+                "🔑 Generate new keys using /key or /gkey.\n"
+                "━━━━━━━━━━━━━━━━━━━━━━"
+            )
             return
 
-        # Group keys by duration and reseller
-        duration_keys = {}
-        reseller_keys = {}
-        total_keys = 0
-        
-        for key in keys:
-            total_keys += 1
-            duration = key['duration']
-            reseller_id = key['transaction'][0]['reseller_id'] if key.get('transaction') else 'admin'
-            
-            if duration not in duration_keys:
-                duration_keys[duration] = 0
-            duration_keys[duration] += 1
-            
-            if reseller_id not in reseller_keys:
-                reseller_keys[reseller_id] = []
-                
-            created_at_ist = key['created_at'].astimezone(IST).strftime('%Y-%m-%d %H:%M:%S')
-            key_info = f"""🔑 Key: `{key['key']}`
-⏱ Duration: {duration}
-📅 Created: {created_at_ist} IST"""
-            reseller_keys[reseller_id].append(key_info)
+        # Fetch reseller transactions to match resellers with keys
+        reseller_transactions = list(db.get_collection("reseller_transactions").find({"type": "KEY_GENERATION"}))
 
-        # Build summary section
-        response = f"""📊 𝗞𝗲𝘆𝘀 𝗦𝘂𝗺𝗺𝗮𝗿𝘆
-━━━━━━━━━━━━━━━
-📦 Total Keys: {total_keys}
+        # Fetch reseller usernames using `telegram_id`
+        reseller_data = list(db.get_collection("resellers").find({}, {"telegram_id": 1, "username": 1, "balance": 1}))
+        resellers = {str(r["telegram_id"]): {"username": r.get("username", f"Unknown ({r['telegram_id']})"), "balance": r["balance"]} for r in reseller_data}
 
-⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 𝗕𝗿𝗲𝗮𝗸𝗱𝗼𝘄𝗻:"""
+        # Map reseller transactions to include usernames
+        reseller_map = {}
+        for txn in reseller_transactions:
+            reseller_id = str(txn["reseller_id"])  # Ensure reseller_id is a string
+            reseller_username = resellers.get(reseller_id, {}).get("username", f"Unknown ({reseller_id})")
+            reseller_map[txn["key_generated"]] = {"id": reseller_id, "username": reseller_username}
 
-        for duration, count in sorted(duration_keys.items()):
-            response += f"\n• {duration}: {count} keys"
+        # Sorting Data
+        single_use_admin, multi_use_admin = [], []
+        reseller_keys = {}  # Group reseller keys by their username
 
-        response += "\n\n🔑 𝗔𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 𝗞𝗲𝘆𝘀 𝗯𝘆 𝗥𝗲𝘀𝗲𝗹𝗹𝗲𝗿:\n"
+        for key in all_keys:
+            key_code = key.get("key")
+            max_uses = key.get("max_uses", 1)  # Default to 1 if not set
+            used_count = key.get("used_count", 0)
+            is_multi_use = max_uses > 1 and used_count < max_uses
+            is_single_use = max_uses == 1 or "max_uses" not in key  # Correctly detect single-use keys
 
-        # Add reseller sections
-        for reseller_id, keys_list in reseller_keys.items():
-            try:
-                if reseller_id == 'admin':
-                    reseller_name = "Admin Generated"
+            if key_code in reseller_map:
+                reseller_info = reseller_map[key_code]  # Now contains both ID and username
+                reseller_id = reseller_info["id"]
+                reseller_username = reseller_info["username"]
+
+                if reseller_id not in reseller_keys:
+                    reseller_keys[reseller_id] = {
+                        "username": reseller_username,  # Now properly stores the username
+                        "balance": resellers.get(reseller_id, {}).get("balance", 0),
+                        "single_use": [],
+                        "multi_use": []
+                    }
+
+                if is_multi_use:
+                    reseller_keys[reseller_id]["multi_use"].append(key)
+                elif is_single_use:
+                    reseller_keys[reseller_id]["single_use"].append(key)
+            else:
+                if is_multi_use:
+                    multi_use_admin.append(key)
+                elif is_single_use:
+                    single_use_admin.append(key)
+
+        # 📜 **Formatted Message**
+        message_text = (
+            "📜 ACTIVE KEYS AVAILABLE\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 Total Usable Keys: {len(all_keys)}\n"
+            f"🔄 Multi-use Keys (Usable): {len(multi_use_admin) + sum(len(v['multi_use']) for v in reseller_keys.values())}\n"
+            f"👤 Admin Created Keys: {len(single_use_admin) + len(multi_use_admin)}\n"
+            f"👥 Reseller Created Keys: {sum(len(v['single_use']) + len(v['multi_use']) for v in reseller_keys.values())}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+        )
+
+        # 🔹 **List Admin Multi-Use Keys**
+        if multi_use_admin:
+            message_text += "🔄 Multi-use Admin Keys:\n"
+            for key in multi_use_admin:
+                expiry = key.get("expiration", "No Expiry")
+                if isinstance(expiry, datetime):
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=pytz.UTC)  # Assume UTC if no timezone
+                    expiry = expiry.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S') + " IST"
                 else:
-                    user_info = bot.get_chat(reseller_id)
-                    reseller_name = f"@{user_info.username}" if user_info.username else user_info.first_name
-                
-                response += f"\n👤 {reseller_name} ({len(keys_list)} keys):\n"
-                response += "━━━━━━━━━━━━━━━\n"
-                response += "\n\n".join(keys_list)
-                response += "\n\n"
-            except Exception:
-                continue
+                    expiry = "No Expiry"
 
-        # Split response if too long
-        if len(response) > 4096:
-            for x in range(0, len(response), 4096):
-                bot.reply_to(message, response[x:x+4096])
-        else:
-            bot.reply_to(message, response)
-            
+                created_at = key.get("created_at", "Unknown")
+                if isinstance(created_at, datetime):
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=pytz.UTC)  # Assume UTC if no timezone
+                    created_at = created_at.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S') + " IST"
+                else:
+                    created_at = "Unknown"
+
+                duration = key.get("duration", "Unknown")
+                message_text += (
+                    f"🔄 Key: `{key['key']}`\n"
+                    f"   Uses: {key['used_count']}/{key['max_uses']}\n"
+                    f"   Duration: {duration}\n"
+                    f"   Created: {created_at}\n"
+                    f"   Expires: {expiry}\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                )
+
+        # 🔹 **List Admin Single-Use Keys**
+        if single_use_admin:
+            message_text += "🔹 Single-use Admin Keys:\n"
+            for key in single_use_admin:
+                expiry = key.get("expiration", "No Expiry")
+                if isinstance(expiry, datetime):
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=pytz.UTC)  # Assume UTC if no timezone
+                    expiry = expiry.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S') + " IST"
+                else:
+                    expiry = "No Expiry"
+
+                created_at = key.get("created_at", "Unknown")
+                if isinstance(created_at, datetime):
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=pytz.UTC)  # Assume UTC if no timezone
+                    created_at = created_at.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S') + " IST"
+                else:
+                    created_at = "Unknown"
+
+                duration = key.get("duration", "Unknown")
+                message_text += (
+                    f"🔹 Key: `{key['key']}`\n"
+                    f"   Duration: {duration}\n"
+                    f"   Created: {created_at}\n"
+                    f"   Expires: {expiry}\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                )
+
+        # 🔹 **List Reseller Keys by Reseller**
+        if reseller_keys:
+            for reseller_id, data in reseller_keys.items():
+                message_text += (
+                    f"👥 Reseller: @{data['username']}\n"
+                    f"💰 Balance: {data['balance']:,} Credits\n"
+                )
+                if data["multi_use"]:
+                    message_text += "🔄 Multi-use Reseller Keys:\n"
+                    for key in data["multi_use"]:
+                        expiry = key.get("expiration", "No Expiry")
+                        if isinstance(expiry, datetime):
+                            if expiry.tzinfo is None:
+                                expiry = expiry.replace(tzinfo=pytz.UTC)  # Assume UTC if no timezone
+                            expiry = expiry.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S') + " IST"
+                        else:
+                            expiry = "No Expiry"
+
+                        created_at = key.get("created_at", "Unknown")
+                        if isinstance(created_at, datetime):
+                            if created_at.tzinfo is None:
+                                created_at = created_at.replace(tzinfo=pytz.UTC)  # Assume UTC if no timezone
+                            created_at = created_at.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S') + " IST"
+                        else:
+                            created_at = "Unknown"
+
+                        duration = key.get("duration", "Unknown")
+                        message_text += (
+                            f"🔄 Key: `{key['key']}`\n"
+                            f"   Uses: {key['used_count']}/{key['max_uses']}\n"
+                            f"   Duration: {duration}\n"
+                            f"   Created: {created_at}\n"
+                            f"   Expires: {expiry}\n"
+                            "━━━━━━━━━━━━━━━━━━━━━━\n"
+                        )
+
+                if data["single_use"]:
+                    message_text += "🔹 Single-use Reseller Keys:\n"
+                    for key in data["single_use"]:
+                        expiry = key.get("expiration", "No Expiry")
+                        if isinstance(expiry, datetime):
+                            if expiry.tzinfo is None:
+                                expiry = expiry.replace(tzinfo=pytz.UTC)  # Assume UTC if no timezone
+                            expiry = expiry.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S') + " IST"
+                        else:
+                            expiry = "No Expiry"
+
+                        created_at = key.get("created_at", "Unknown")
+                        if isinstance(created_at, datetime):
+                            if created_at.tzinfo is None:
+                                created_at = created_at.replace(tzinfo=pytz.UTC)  # Assume UTC if no timezone
+                            created_at = created_at.astimezone(IST).strftime('%Y-%m-%d %H:%M:%S') + " IST"
+                        else:
+                            created_at = "Unknown"
+
+                        duration = key.get("duration", "Unknown")
+                        message_text += (
+                            f"🔹 Key: `{key['key']}`\n"
+                            f"   Duration: {duration}\n"
+                            f"   Created: {created_at}\n"
+                            f"   Expires: {expiry}\n"
+                            "━━━━━━━━━━━━━━━━━━━━━━\n"
+                        )
+
+        # ✅ **Send the Response**
+        bot.reply_to(message, message_text)
+
     except Exception as e:
-        bot.reply_to(message, f"❌ Error fetching keys: {str(e)}")
-
+        bot.reply_to(message, f"❌ Error retrieving active keys: {str(e)}")
+        print(f"ERROR - all_keys(): {e}")
 
 
 @bot.message_handler(commands=['allusers'])
@@ -583,6 +765,73 @@ def show_users(message):
             
     except Exception as e:
         bot.reply_to(message, f"❌ Error fetching users: {str(e)}")
+
+# Add this function to parse the multi-use key input
+def parse_multi_use_key_input(time_input, max_uses):
+    match = re.match(r"(\d+)([mhd])", time_input)
+    if match:
+        number = int(match.group(1))
+        unit = match.group(2)
+        
+        if unit == "m":
+            return timedelta(minutes=number), f"{number}m", max_uses
+        elif unit == "h":
+            return timedelta(hours=number), f"{number}h", max_uses
+        elif unit == "d":
+            return timedelta(days=number), f"{number}d", max_uses
+    return None, None, None
+
+# Add the /gkey command to generate multi-use keys
+@bot.message_handler(commands=['gkey'])
+def generate_multi_use_key(message):
+    user_id = str(message.chat.id)
+    if user_id not in admin_owner:
+        bot.reply_to(message, "⛔️ Access Denied: Admin only command")
+        return
+
+    try:
+        args = message.text.split()
+        if len(args) != 3:
+            bot.reply_to(message, "📝 Usage: /gkey <duration> <max_uses>\nExample: /gkey 1h 5")
+            return
+
+        duration_str = args[1]
+        max_uses = int(args[2])
+
+        # ✅ Fix unpacking issue
+        duration, formatted_duration, _ = parse_time_input(duration_str)
+
+        if not duration:
+            bot.reply_to(message, "❌ Invalid duration format. Use: 1d, 7d, 30d")
+            return
+
+        letters = ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=4))
+        numbers = ''.join(str(random.randint(0, 9)) for _ in range(4))
+        key = f"MATRIX-VIP-{letters}{numbers}"
+
+        # ✅ Expiration starts when the key is created
+        created_at = datetime.now(IST)
+        expiration = created_at + duration  
+
+        keys_collection.insert_one({
+            "key": key,
+            "duration": formatted_duration,
+            "created_at": created_at,
+            "expiration": expiration,  # Expiration starts at key creation
+            "is_used": False,
+            "max_uses": max_uses,
+            "used_count": 0
+        })
+
+        bot.reply_to(message, f"""✅ Multi-Use Key Generated Successfully
+🔑 Key: `{key}`
+⏱ Duration: {formatted_duration}
+🔢 Max Uses: {max_uses}
+📅 **Expires: {expiration.strftime('%Y-%m-%d %H:%M:%S')} IST**
+""")
+
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error generating key: {str(e)}")
 
 
 @bot.message_handler(commands=['broadcast'])
@@ -1308,6 +1557,7 @@ def run_bot():
         except Exception as e:
             logging.error(f"Bot error: {e}")
             time.sleep(15)
+
 
 if __name__ == "__main__":
     run_bot()
