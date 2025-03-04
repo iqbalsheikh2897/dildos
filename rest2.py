@@ -204,6 +204,12 @@ def generate_key(message):
 def redeem_key(message):
     try:
         user_id = str(message.chat.id)
+
+        # Prevent usage in groups
+        if user_id.startswith('-'):
+            bot.reply_to(message, "⚠️ This command cannot be used in groups. Please use it in private chat with the bot.")
+            return
+
         args = message.text.split()
         if len(args) != 2:
             bot.reply_to(message, "📝 Usage: /redeem <key>\nExample: /redeem MATRIX-VIP-XXXX")
@@ -213,12 +219,15 @@ def redeem_key(message):
         username = message.from_user.username or "Unknown"
         current_time = datetime.now(IST)
 
-        # Check if the user already exists
+        # ✅ Check if the user already exists
         existing_user = users_collection.find_one({"user_id": user_id})
         if existing_user:
             expiration = existing_user['expiration']
+            
+            # ✅ Convert string expiration to datetime if needed
             if isinstance(expiration, str):
                 expiration = datetime.strptime(expiration, '%Y-%m-%d %H:%M:%S IST')
+
             expiration = expiration.astimezone(IST)
 
             bot.reply_to(message, f"""
@@ -232,28 +241,30 @@ def redeem_key(message):
 ━━━━━━━━━━━━━━━""")
             return
 
-        # Check if the key exists
+        # ✅ Check if the key exists
         key_doc = keys_collection.find_one({"key": key, "is_used": False})
         if not key_doc:
             bot.reply_to(message, "❌ Invalid key!")
             return
 
-        # Get expiration time
+        # ✅ Get expiration time
         duration_str = key_doc.get("duration")
         duration, _, _ = parse_time_input(duration_str)
         expiration = current_time + duration if duration else None
 
+        # Ensure expiration is a valid datetime
         if expiration and expiration < current_time:
             bot.reply_to(message, "❌ This key has expired!")
             return
 
-        # Handle multi-use keys
+        # ✅ Handle multi-use keys
         if "max_uses" in key_doc:
             if key_doc["used_count"] >= key_doc["max_uses"]:
                 bot.reply_to(message, "❌ This key has reached its maximum usage limit!")
                 keys_collection.update_one({"key": key}, {"$set": {"is_used": True}})
                 return
             else:
+                # Increment the used count
                 keys_collection.update_one({"key": key}, {"$inc": {"used_count": 1}})
                 used_count = key_doc["used_count"] + 1
                 max_uses = key_doc["max_uses"]
@@ -262,18 +273,16 @@ def redeem_key(message):
             usage_status = "Single-use"
             keys_collection.update_one({"key": key}, {"$set": {"is_used": True}})
 
-        # Store the user
-        user_data = {
+        # ✅ Store the user
+        users_collection.insert_one({
             "user_id": user_id,
             "username": username,
             "key": key,
             "redeemed_at": current_time.strftime('%Y-%m-%d %H:%M:%S') + " IST",
-            "expiration": expiration
-        }
-        users_collection.insert_one(user_data)
-        print(f"User data inserted: {user_data}")
+            "expiration": expiration  # Store as a datetime object
+        })
 
-        # Send success message
+        # ✅ Send success message
         success_message = f"""
 ✅ 𝗞𝗘𝗬 𝗥𝗘𝗗𝗘𝗘𝗠𝗘𝗗 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟𝗟𝗬
 ━━━━━━━━━━━━━━━
@@ -285,9 +294,10 @@ def redeem_key(message):
 ━━━━━━━━━━━━━━━
 💡 Enjoy your subscription!
 """
+
         bot.reply_to(message, success_message)
 
-        # Notify admins
+        # ✅ Notify admins
         admin_message = f"""
 🚨 𝗞𝗘𝗬 𝗥𝗘𝗗𝗘𝗘𝗠𝗘𝗗 𝗡𝗢𝗧𝗜𝗙𝗜𝗖𝗔𝗧𝗜𝗢𝗡
 ━━━━━━━━━━━━━━━
@@ -297,8 +307,10 @@ def redeem_key(message):
 ⏱️ Duration: {key_doc.get("duration", "Unknown")}
 📅 Expires: {expiration.strftime('%Y-%m-%d %H:%M:%S')} IST
 """
+
         if "max_uses" in key_doc:
             admin_message += f"🔢 Usage: {usage_status}\n"
+
         admin_message += "━━━━━━━━━━━━━━━"
 
         for admin in admin_id:
@@ -417,19 +429,30 @@ def all_keys(message):
         # Get current IST time
         current_time = datetime.now(IST)
 
-        # Fetch only ACTIVE and USABLE keys
-        all_keys = list(db.get_collection("unused_keys").find({
-    "is_used": False,  # Ensure only unused keys are shown
-    "$or": [
-        {"max_uses": {"$exists": False}},  # Single-use keys
-        {"max_uses": {"$gt": 0}, "$expr": {"$lt": ["$used_count", "$max_uses"]}}  # Multi-use keys with remaining uses
-    ],
-    "$or": [
-        {"expiration": {"$exists": False}},  # No expiration set
-        {"expiration": {"$gte": current_time}}  # Not expired
-    ]
-}))
-
+        # Fetch all ACTIVE and USABLE keys
+        all_keys = list(db.get_collection("unused_keys").aggregate([
+            {
+                "$lookup": {
+                    "from": "reseller_transactions",
+                    "localField": "key",
+                    "foreignField": "key_generated",
+                    "as": "transaction"
+                }
+            },
+            {
+                "$match": {
+                    "is_used": False,  # Ensure only unused keys are shown
+                    "$or": [
+                        {"max_uses": {"$exists": False}},  # Single-use keys
+                        {"max_uses": {"$gt": 0}, "$expr": {"$lt": ["$used_count", "$max_uses"]}}  # Multi-use keys with remaining uses
+                    ],
+                    "$or": [
+                        {"expiration": {"$exists": False}},  # No expiration set
+                        {"expiration": {"$gte": current_time}}  # Not expired
+                    ]
+                }
+            }
+        ]))
 
         if not all_keys:
             bot.reply_to(message, 
@@ -629,7 +652,6 @@ def all_keys(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Error retrieving active keys: {str(e)}")
         print(f"ERROR - all_keys(): {e}")
-
 
 @bot.message_handler(commands=['allusers'])
 def show_users(message):
