@@ -23,7 +23,7 @@ from time import sleep as wait
 # MongoDB configuration
 uri = "mongodb+srv://uthayakrishna67:Uthaya$0@cluster0.mlxuz.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 client = pymongo.MongoClient(uri)
-db = client['telegram_bot']
+db = client['telegram_botcheck']
 users_collection = db['users']
 keys_collection = db['unused_keys']
 
@@ -204,125 +204,76 @@ def generate_key(message):
 def redeem_key(message):
     try:
         user_id = str(message.chat.id)
-
-        # Prevent usage in groups
-        if user_id.startswith('-'):
-            bot.reply_to(message, """
-⚠️ 𝗚𝗥𝗢𝗨𝗣 𝗔𝗖𝗖𝗘𝗦𝗦 𝗗𝗘𝗡𝗜𝗘𝗗
-━━━━━━━━━━━━━━━
-❌ This command cannot be used in groups
-🔐 Please use this command in private chat with the bot
-
-📱 How to use:
-1. Open MATRIX BOT in private
-2. Start the bot
-3. Use /redeem command there
-
-💡 This ensures your license key remains private and secure
-━━━━━━━━━━━━━━━""")
-            return
-
         args = message.text.split()
         if len(args) != 2:
-            bot.reply_to(message, """
-💎 𝗞𝗘𝗬 𝗥𝗘𝗗𝗘𝗠𝗣𝗧𝗜𝗢𝗡
-━━━━━━━━━━━━━━━
-📝 𝗨𝘀𝗮𝗴𝗲: /redeem 𝗠𝗔𝗧𝗥𝗜𝗫-𝗩𝗜𝗣-𝗫𝗫𝗫𝗫
-
-⚠️ 𝗜𝗺𝗽𝗼𝗿𝘁𝗮𝗻𝘁 𝗡𝗼𝘁𝗲𝘀:
-• 𝗞𝗲𝘆𝘀 𝗮𝗿𝗲 𝗰𝗮𝘀𝗲-𝘀𝗲𝗻𝘀𝗶𝘁𝗶𝘃𝗲
-• 𝗢𝗻𝗲-𝘁𝗶𝗺𝗲 𝘂𝘀𝗲 𝗼𝗻𝗹𝘆
-• 𝗡𝗼𝗻-𝘁𝗿𝗮𝗻𝘀𝗳𝗲𝗿𝗮𝗯𝗹𝗲
-
-🔑 𝗘𝘅𝗮𝗺𝗽𝗹𝗲: /redeem 𝗠𝗔𝗧𝗥𝗜𝗫-𝗩𝗜𝗣-𝗔𝗕𝗖𝗗𝟭𝟮𝟯𝟰
-
-💡 𝗡𝗲𝗲𝗱 𝗮 𝗸𝗲𝘆? 𝗖𝗼𝗻𝘁𝗮𝗰𝘁 𝗢𝘂𝗿 𝗔𝗱𝗺𝗶𝗻𝘀 𝗢𝗿 𝗥𝗲𝘀𝗲𝗹𝗹𝗲𝗿𝘀
-━━━━━━━━━━━━━━━""")
+            bot.reply_to(message, "📝 Usage: /redeem <key>\nExample: /redeem MATRIX-VIP-XXXX")
             return
 
         key = args[1].strip()
         username = message.from_user.username or "Unknown"
-        current_time = datetime.now(IST)  # Always use IST
+        current_time = datetime.now(IST)
 
-        print(f"DEBUG - Redeeming key: {key} for user {user_id} at {current_time}")
-
-        # Check if the user already has an active subscription
-        existing_user = users_collection.find_one({
-            "user_id": user_id,
-            "expiration": {"$gt": current_time}
-        })
-
+        # Check if the user already exists
+        existing_user = users_collection.find_one({"user_id": user_id})
         if existing_user:
-            expiration = existing_user['expiration'].astimezone(IST)
+            expiration = existing_user['expiration']
+            if isinstance(expiration, str):
+                expiration = datetime.strptime(expiration, '%Y-%m-%d %H:%M:%S IST')
+            expiration = expiration.astimezone(IST)
+
             bot.reply_to(message, f"""
-⚠️ 𝗔𝗖𝗧𝗜𝗩𝗘 𝗦𝗨𝗕𝗦𝗖𝗥𝗜𝗣𝗧𝗜𝗢𝗡 𝗗𝗘𝗧𝗘𝗖𝗧𝗘𝗗
+⚠️ You already have an active subscription!
 ━━━━━━━━━━━━━━━
 👤 User: @{message.from_user.username}
 🔑 Key: {existing_user['key']}
+📅 Expires: {expiration.strftime('%Y-%m-%d %H:%M:%S')} IST
 
-⏰ 𝗧𝗶𝗺𝗲𝗹𝗶𝗻𝗲:
-• Current Time: {current_time.strftime('%Y-%m-%d %H:%M:%S')} IST
-• Expires: {expiration.strftime('%Y-%m-%d %H:%M:%S')} IST
-
-⚠️ 𝗡𝗼𝘁𝗶𝗰𝗲:
-You cannot redeem a new key while having an active subscription.
-Please wait for your current subscription to expire.
-
-💡 𝗧𝗶𝗽: Use /start to view your subscription status
+⚠️ You must wait until your current subscription expires before redeeming a new key.
 ━━━━━━━━━━━━━━━""")
             return
 
         # Check if the key exists
-        key_doc = keys_collection.find_one({"key": key})
+        key_doc = keys_collection.find_one({"key": key, "is_used": False})
         if not key_doc:
             bot.reply_to(message, "❌ Invalid key!")
             return
 
-        # Handle expiration separately for `/key` and `/gkey`
-        expiration = key_doc.get("expiration")
+        # Get expiration time
+        duration_str = key_doc.get("duration")
+        duration, _, _ = parse_time_input(duration_str)
+        expiration = current_time + duration if duration else None
 
-        if expiration:
-            # If expiration is already set, it's from `/gkey`
-            if expiration.tzinfo is None:
-                expiration = expiration.replace(tzinfo=pytz.UTC)
-            expiration = expiration.astimezone(IST)
-        else:
-            # If no expiration, it's from `/key`, so set expiration now
-            duration_str = key_doc.get("duration")
-            duration, _, _ = parse_time_input(duration_str)
-            expiration = current_time + duration
-
-        # Ensure the key isn't expired
         if expiration and expiration < current_time:
             bot.reply_to(message, "❌ This key has expired!")
             return
 
-        # Check if the key has remaining uses (for multi-use keys)
+        # Handle multi-use keys
         if "max_uses" in key_doc:
             if key_doc["used_count"] >= key_doc["max_uses"]:
-                bot.reply_to(message, """❌ This key has reached its maximum usage limit!
-                💡 𝗧𝗶𝗽: Buy Key From Any Admin Or Owner""")
+                bot.reply_to(message, "❌ This key has reached its maximum usage limit!")
                 keys_collection.update_one({"key": key}, {"$set": {"is_used": True}})
                 return
             else:
-                # Increment the used count
                 keys_collection.update_one({"key": key}, {"$inc": {"used_count": 1}})
                 used_count = key_doc["used_count"] + 1
                 max_uses = key_doc["max_uses"]
                 usage_status = f"{used_count}/{max_uses}"
         else:
             usage_status = "Single-use"
+            keys_collection.update_one({"key": key}, {"$set": {"is_used": True}})
 
-        # Store the user with the expiration time
-        users_collection.insert_one({
+        # Store the user
+        user_data = {
             "user_id": user_id,
             "username": username,
             "key": key,
             "redeemed_at": current_time.strftime('%Y-%m-%d %H:%M:%S') + " IST",
-            "expiration": expiration.strftime('%Y-%m-%d %H:%M:%S') + " IST"
-        })
+            "expiration": expiration
+        }
+        users_collection.insert_one(user_data)
+        print(f"User data inserted: {user_data}")
 
-        # Build the success message
+        # Send success message
         success_message = f"""
 ✅ 𝗞𝗘𝗬 𝗥𝗘𝗗𝗘𝗘𝗠𝗘𝗗 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟𝗟𝗬
 ━━━━━━━━━━━━━━━
@@ -333,9 +284,7 @@ Please wait for your current subscription to expire.
 📅 Expires: {expiration.strftime('%Y-%m-%d %H:%M:%S')} IST
 ━━━━━━━━━━━━━━━
 💡 Enjoy your subscription!
-💥 Send Feedbacks 
 """
-
         bot.reply_to(message, success_message)
 
         # Notify admins
@@ -348,11 +297,8 @@ Please wait for your current subscription to expire.
 ⏱️ Duration: {key_doc.get("duration", "Unknown")}
 📅 Expires: {expiration.strftime('%Y-%m-%d %H:%M:%S')} IST
 """
-
-        # Add usage status for multi-use keys
         if "max_uses" in key_doc:
             admin_message += f"🔢 Usage: {usage_status}\n"
-
         admin_message += "━━━━━━━━━━━━━━━"
 
         for admin in admin_id:
@@ -473,15 +419,17 @@ def all_keys(message):
 
         # Fetch only ACTIVE and USABLE keys
         all_keys = list(db.get_collection("unused_keys").find({
-            "$or": [
-                {"max_uses": {"$exists": False}, "is_used": False},  # Single-use keys
-                {"max_uses": {"$gt": 0}, "$expr": {"$lt": ["$used_count", "$max_uses"]}}  # Multi-use keys with remaining uses
-            ],
-            "$or": [
-                {"expiration": {"$exists": False}},  # No expiration set
-                {"expiration": {"$gte": current_time}}  # Not expired
-            ]
-        }))
+    "is_used": False,  # Ensure only unused keys are shown
+    "$or": [
+        {"max_uses": {"$exists": False}},  # Single-use keys
+        {"max_uses": {"$gt": 0}, "$expr": {"$lt": ["$used_count", "$max_uses"]}}  # Multi-use keys with remaining uses
+    ],
+    "$or": [
+        {"expiration": {"$exists": False}},  # No expiration set
+        {"expiration": {"$gte": current_time}}  # Not expired
+    ]
+}))
+
 
         if not all_keys:
             bot.reply_to(message, 
@@ -696,7 +644,11 @@ def show_users(message):
         users = users_collection.aggregate([
             {
                 "$match": {
-                    "expiration": {"$gt": current_time}
+                    "expiration": {"$gt": current_time},
+                    "$or": [
+                        {"max_uses": {"$exists": False}},  # Single-use keys
+                        {"max_uses": {"$gt": "$used_count"}}  # Multi-use keys with remaining uses
+                    ]
                 }
             },
             {
@@ -798,20 +750,21 @@ def generate_multi_use_key(message):
         duration_str = args[1]
         max_uses = int(args[2])
 
-        # ✅ Fix unpacking issue
+        # Parse the time input
         duration, formatted_duration, _ = parse_time_input(duration_str)
 
         if not duration:
             bot.reply_to(message, "❌ Invalid duration format. Use: 1d, 7d, 30d")
             return
 
+        # Generate a unique key
         letters = ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=4))
         numbers = ''.join(str(random.randint(0, 9)) for _ in range(4))
         key = f"MATRIX-VIP-{letters}{numbers}"
 
-        # ✅ Expiration starts when the key is created
+        # Set expiration time immediately
         created_at = datetime.now(IST)
-        expiration = created_at + duration  
+        expiration = created_at + duration
 
         keys_collection.insert_one({
             "key": key,
