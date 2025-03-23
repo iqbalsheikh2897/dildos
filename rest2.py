@@ -1202,10 +1202,10 @@ def handle_matrix(message):
 🔥 𝗠𝗔𝗧𝗥𝗜𝗫 𝗩𝗜𝗣 𝗗𝗗𝗢𝗦 📈
 
 📝 𝗨𝘀𝗮𝗴𝗲: /matrix <ip> <port> <time>
-𝗘𝘅𝗮𝗺𝗽𝗹𝗲: /matrix 1.1.1.1 80 240
+𝗘𝘅𝗮𝗺𝗽𝗹𝗲: /matrix 1.1.1.1 80 180
 
 ⚠️ 𝗟𝗶𝗺𝗶𝘁𝗮𝘁𝗶𝗼𝗻𝘀:
-• 𝗠𝗮𝘅 𝘁𝗶𝗺𝗲: 240 𝘀𝗲𝗰𝗼𝗻𝗱𝘀
+• 𝗠𝗮𝘅 𝘁𝗶𝗺𝗲: 180 𝘀𝗲𝗰𝗼𝗻𝗱𝘀
 • 𝗖𝗼𝗼𝗹𝗱𝗼𝘄𝗻: 5 𝗺𝗶𝗻𝘂𝘁𝗲𝘀""")
         return
 
@@ -1215,8 +1215,8 @@ def handle_matrix(message):
         time_attack = int(args[3])
         current_time = datetime.now(IST)
 
-        if time_attack > 240:
-            bot.reply_to(message, "⚠️ Maximum attack time is 240 seconds.")
+        if time_attack > 180:
+            bot.reply_to(message, "⚠️ Maximum attack time is 180 seconds.")
             return
 
         vps = get_available_vps()
