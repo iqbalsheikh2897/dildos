@@ -360,7 +360,8 @@ Command: /addtime <key> <duration>
 The specified key is not associated with any active user.""")
             return
 
-        duration, formatted_duration = parse_time_input(duration_str)
+        # Parse the time input
+        duration, formatted_duration, _ = parse_time_input(duration_str)
         if not duration:
             bot.reply_to(message, """❌ 𝗜𝗡𝗩𝗔𝗟𝗜𝗗 𝗗𝗨𝗥𝗔𝗧𝗜𝗢𝗡
 ━━━━━━━━━━━━━━━
